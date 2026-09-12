@@ -2321,8 +2321,8 @@ function renderResumo(){
         <span style="font-size:13px;font-weight:700;color:var(--text-strong)">${title}</span>
         ${dateLbl?`<span style="font-size:11px;color:var(--hint);font-family:'JetBrains Mono',monospace">${dateLbl}</span>`:""}
       </div>
-      ${isHoje?investRowHoje(plan):row("Investimento",fBRL(m.spend),plan?`plan.: ${fBRL(plan.investimento)}`:"sem plano p/ este período","")}
-      ${row("Cadastros no AC Tráfego",m.leadsTrafego,plan?`plan.: ${plan.leads.toLocaleString("pt-BR")}`:"sem plano p/ este período","")}
+      ${isHoje?investRowHoje(plan):row("Investimento",fBRL(m.spend),plan?`plan.: ${fBRL(plan.investimento)}`:"","")}
+      ${row("Cadastros no AC Tráfego",m.leadsTrafego,plan?`plan.: ${plan.leads.toLocaleString("pt-BR")}`:"","")}
       ${row("Custo por cadastro AC Tráfego",c.txt,`🎯 ${fBRL(META_CPL)}`,c.emoji)}
       <div style="height:6px"></div>
       ${row("Cadastros no AC Orgânico",m.leadsOrganico,"","")}
@@ -2343,8 +2343,8 @@ function renderResumo(){
     const pctAtingimento=(atingimentoPlan&&atingimentoPlan.leads>0)?(m.leads/atingimentoPlan.leads)*100:null;
     return `${label}${dateLbl?`\t${dateLbl}`:""}
 
-Investimento:\t${fBRL(m.spend)}\t${plan?`(plan.: ${fBRL(plan.investimento)})`:"(sem plano p/ este período)"}
-Cadastros no AC Tráfego:\t${m.leadsTrafego}\t${plan?`(plan.: ${plan.leads})`:"(sem plano p/ este período)"}
+Investimento:\t${fBRL(m.spend)}${plan?`\t(plan.: ${fBRL(plan.investimento)})`:""}
+Cadastros no AC Tráfego:\t${m.leadsTrafego}${plan?`\t(plan.: ${plan.leads})`:""}
 
 Custo por cadastro AC Tráfego:\t${c.txt}\t${c.emoji} (🎯: ${fBRL(META_CPL)})
 
@@ -3936,12 +3936,33 @@ function renderAulas(){
 function renderPlanoReal(){
   const el=document.getElementById("page-planoreal");if(!el)return;
   const today=todayISO();
-  const plano=PLANO_DIARIO;
+  // Dias exibidos na tabela diária: união das datas do PLANO_DIARIO com as
+  // datas que já têm dado real (investimento de campanha de Captação na Base
+  // meta, ou lead na Base leads). Assim o acompanhamento diário — quanto
+  // investiu e quantos leads deu em cada dia — funciona mesmo com o
+  // PLANO_DIARIO vazio: o dia aparece com planejado 0 e o realizado
+  // preenchido. Quando o planejamento for informado, cada dia do plano passa
+  // a usar os valores dele automaticamente, sem mais nenhuma mudança aqui.
+  // Leads desta aba = SÓ TRÁFEGO. A meta de leads do plano vem de
+  // investimento ÷ META_CPL, ou seja, é meta de lead pago — comparar contra
+  // o total (que no MDI é ~80% orgânico) não faria sentido.
+  const leadsTrafegoByDate={};
+  for(const l of S.leadsRows){
+    if(l.channel==="trafego")leadsTrafegoByDate[l.date]=(leadsTrafegoByDate[l.date]||0)+1;
+  }
+  const planoByDate={};
+  for(const p of PLANO_DIARIO)planoByDate[p.date]=p;
+  const datasComDado=[
+    ...S.metaRows.filter(r=>campaignStage(r.campName)==="Captação").map(r=>r.date),
+    ...Object.keys(leadsTrafegoByDate),
+  ];
+  const plano=[...new Set([...Object.keys(planoByDate),...datasComDado])].sort()
+    .map(date=>planoByDate[date]||{date,investimento:0,leads:0});
 
   const rows=plano.map(p=>{
     const isFuture=p.date>today;
     const investReal=isFuture?null:stageSpendForDate("Captação",p.date);
-    const leadsReal=isFuture?null:(S.leadsByDate[p.date]||0);
+    const leadsReal=isFuture?null:(leadsTrafegoByDate[p.date]||0);
     return{...p,isFuture,isToday:p.date===today,investReal,leadsReal};
   });
 
@@ -4063,7 +4084,7 @@ function renderPlanoReal(){
       ${kpiCard("Investimento Planejado",fBRL(totalInvestPlan),`${diasTotal} dias`,"var(--text-strong)")}
       ${kpiCard("Investimento Realizado",fBRL(totalInvestReal),`Investimento planejado até hoje: ${fBRL(investPlanAteHoje)}`,investAteHojeColor,false,totalInvestReal,investPlanAteHoje,true)}
       ${kpiCard("Leads Planejados",totalLeadsPlan.toLocaleString("pt-BR"),`${diasTotal} dias`,"var(--text-strong)")}
-      ${kpiCard("Leads Realizados",totalLeadsReal.toLocaleString("pt-BR"),`Leads planejados até hoje: ${leadsPlanAteHoje.toLocaleString("pt-BR")}`,leadsAteHojeColor,false,totalLeadsReal,leadsPlanAteHoje,true)}
+      ${kpiCard("Leads Realizados (tráfego)",totalLeadsReal.toLocaleString("pt-BR"),`Leads planejados até hoje: ${leadsPlanAteHoje.toLocaleString("pt-BR")}`,leadsAteHojeColor,false,totalLeadsReal,leadsPlanAteHoje,true)}
     </div>
 
     <div class="cc" style="padding:0;overflow:hidden">
@@ -4074,10 +4095,10 @@ function renderPlanoReal(){
           <th style="text-align:right">Investimento Planejado</th>
           <th style="text-align:right">Investimento Realizado</th>
           <th style="text-align:right">Leads Planejados</th>
-          <th style="text-align:right">Leads Realizados</th>
+          <th style="text-align:right" title="Só leads de tráfego pago — o plano de leads vem de investimento ÷ meta de CPL">Leads Realizados (tráfego)</th>
         </tr></thead>
         <tbody>
-          ${rows.length===0?`<tr><td colspan="5" style="color:var(--hint);padding:16px 14px">Planejamento diário da Captação ainda não informado — preencher PLANO_DIARIO no topo do arquivo.</td></tr>`:""}
+          ${rows.length===0?`<tr><td colspan="5" style="color:var(--hint);padding:16px 14px">Nenhum dia com investimento ou lead registrado ainda.</td></tr>`:""}
           ${rows.map(r=>{
             const investColor=r.investReal==null?"var(--hint)":statusColor(r.investReal,r.investimento,true);
             const leadsColor=r.leadsReal==null?"var(--hint)":statusColor(r.leadsReal,r.leads,true);
